@@ -25,12 +25,48 @@ const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 5 }) :
 app.use(cors({ origin: true, credentials: false }));
 app.use(express.json({ limit: maxBodyBytes }));
 
+const adminHtml = String.raw`<!doctype html>
+<html lang="ar" dir="rtl">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>إدارة تراخيص المزامنة</title>
+<style>body{font-family:system-ui,sans-serif;background:#f4f7f5;color:#183126;max-width:1050px;margin:0 auto;padding:24px}h1{margin:0 0 8px}.muted{color:#60756b}.panel{background:#fff;border:1px solid #d9e5df;border-radius:14px;padding:18px;margin:16px 0;box-shadow:0 4px 18px #1831260d}label{display:block;font-weight:700;margin:10px 0 5px}input,select,button{font:inherit;padding:10px;border-radius:8px;border:1px solid #b9cbc2}input,select{width:100%;box-sizing:border-box}button{cursor:pointer;background:#176b4d;color:#fff;border:0;margin:5px 0 0 5px}button.danger{background:#a42c2c}button.secondary{background:#6a7c73}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse}th,td{text-align:right;padding:10px;border-bottom:1px solid #e1ebe6;white-space:nowrap}.code{font-family:monospace;direction:ltr;display:inline-block;background:#edf6f1;padding:4px 7px;border-radius:5px}.status{font-weight:700}.ok{color:#176b4d}.off{color:#a42c2c}#notice{min-height:24px;color:#a42c2c}</style></head>
+<body><h1>لوحة تراخيص المزامنة</h1><p class="muted">لوحة مستقلة لخادم المزامنة. اللوحة القديمة وخادم الترخيص القديم لا يتأثران.</p>
+<section class="panel"><label>رمز الإدارة السري</label><input id="token" type="password" autocomplete="off" placeholder="SYNC_ADMIN_SETUP_TOKEN"><p class="muted">يبقى الرمز في هذا المتصفح فقط ولا يُحفظ في الخادم.</p><button onclick="loadLicenses()">دخول / تحديث</button><span id="notice"></span></section>
+<section class="panel"><h2>إنشاء ترخيص جديد</h2><div class="grid"><div><label>اسم المستخدم</label><input id="userName" placeholder="اسم صاحب المحل"></div><div><label>رقم المستخدم</label><input id="userNumber" placeholder="رقم الهاتف أو الرقم الداخلي"></div><div><label>المدة</label><select id="plan"><option value="monthly">شهري</option><option value="yearly">سنوي</option><option value="lifetime">دائم</option><option value="custom">مخصص</option></select></div><div><label>عدد الأجهزة</label><input id="maxDevices" type="number" min="1" value="3"></div><div><label>تاريخ الانتهاء للمخصص</label><input id="expiresAt" type="date"></div></div><button onclick="createLicense()">توليد الكود وحفظ الترخيص</button></section>
+<section class="panel"><h2>التراخيص والأجهزة</h2><div class="table-wrap"><table><thead><tr><th>الكود</th><th>المستخدم</th><th>الخطة</th><th>الأجهزة</th><th>الانتهاء</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody id="rows"><tr><td colspan="7">أدخل رمز الإدارة واضغط دخول</td></tr></tbody></table></div></section>
+<script>
+const el=id=>document.getElementById(id); const token=()=>el('token').value.trim();
+async function api(path,options){const r=await fetch(path,Object.assign({headers:{'Content-Type':'application/json','x-sync-admin-token':token()}},options||{}));const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.message||data.error||'فشل الطلب');return data;}
+function notice(text,bad=true){el('notice').textContent=text;el('notice').style.color=bad?'#a42c2c':'#176b4d';}
+function dateText(value){return value?new Date(value).toLocaleDateString('ar'): 'دائم';}
+async function loadLicenses(){try{const data=await api('/v1/admin/licenses');window.licenseRows=Object.fromEntries(data.licenses.map(l=>[l.id,l]));el('rows').innerHTML=data.licenses.map(l=>'<tr><td><span class="code">…'+(l.codeHint||'')+'</span></td><td>'+esc(l.userName)+'<br><small>'+esc(l.userNumber)+'</small></td><td>'+esc(l.plan)+'</td><td>'+l.deviceCount+' / '+l.maxDevices+'</td><td>'+dateText(l.expiresAt)+'</td><td class="status '+(l.active?'ok':'off')+'">'+(l.active?'فعال':'موقوف')+'</td><td><button class="secondary" onclick="toggleLicense(\''+l.id+'\')">'+(l.active?'إيقاف':'تفعيل')+'</button><button class="secondary" onclick="renewLicense(\''+l.id+'\')">تجديد</button><button class="secondary" onclick="showDevices(\''+l.id+'\')">الأجهزة</button><button class="danger" onclick="deleteLicense(\''+l.id+'\')">حذف</button></td></tr>').join('')||'<tr><td colspan="7">لا توجد تراخيص</td></tr>';notice('تم التحديث',false)}catch(e){notice(e.message)}}
+function esc(v){return String(v||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+async function createLicense(){try{const plan=el('plan').value;let expiresAt=el('expiresAt').value||null;if(plan==='lifetime')expiresAt=null;const data=await api('/v1/admin/licenses',{method:'POST',body:JSON.stringify({userName:el('userName').value,userNumber:el('userNumber').value,plan,maxDevices:Number(el('maxDevices').value),expiresAt})});alert('تم إنشاء الكود:\n\n'+data.activationCode+'\n\nاحتفظ به وأرسله للمستخدم.');el('userName').value='';el('userNumber').value='';await loadLicenses()}catch(e){notice(e.message)}}
+async function toggleLicense(id){const l=window.licenseRows[id];try{await api('/v1/admin/licenses/'+id,{method:'PATCH',body:JSON.stringify({userName:l.userName,userNumber:l.userNumber,plan:l.plan,maxDevices:l.maxDevices,expiresAt:l.expiresAt,active:!l.active})});await loadLicenses()}catch(e){notice(e.message)}}
+async function renewLicense(id){const l=window.licenseRows[id];const value=prompt('أدخل تاريخ الانتهاء الجديد بصيغة YYYY-MM-DD',l.expiresAt?String(l.expiresAt).slice(0,10):'');if(!value)return;try{await api('/v1/admin/licenses/'+id,{method:'PATCH',body:JSON.stringify({userName:l.userName,userNumber:l.userNumber,plan:l.plan,maxDevices:l.maxDevices,expiresAt:value,active:true})});await loadLicenses()}catch(e){notice(e.message)}}
+async function showDevices(id){const l=window.licenseRows[id];const devices=(l.devices||[]).map(d=>d.deviceName+' ('+d.deviceId+')').join('\\n')||'لا توجد أجهزة نشطة';alert('الأجهزة النشطة:\\n\\n'+devices)}
+async function deleteLicense(id){if(!confirm('سيحذف الترخيص وبياناته المرتبطة نهائيًا. هل أنت متأكد؟'))return;try{await api('/v1/admin/licenses/'+id,{method:'DELETE'});await loadLicenses()}catch(e){notice(e.message)}}
+</script></body></html>`;
+
+app.get("/admin", (_req, res) => res.type("html").send(adminHtml));
+
 function jsonError(res, status, error, message) {
   return res.status(status).json({ ok: false, error, message });
 }
 
 function sha256(value) {
   return crypto.createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function generateActivationCode() {
+  return `INV-${crypto.randomBytes(6).toString("hex").toUpperCase()}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+}
+
+function requireAdmin(req, res) {
+  if (!adminToken || req.get("x-sync-admin-token") !== adminToken) {
+    jsonError(res, 401, "ADMIN_UNAUTHENTICATED", "The setup token is invalid.");
+    return false;
+  }
+  return true;
 }
 
 function encodeToken(payload) {
@@ -178,29 +214,106 @@ app.get("/health", async (_req, res) => {
   }
 });
 
-app.post("/v1/admin/licenses", async (req, res) => {
-  if (!adminToken || req.get("x-sync-admin-token") !== adminToken) {
-    return jsonError(res, 401, "ADMIN_UNAUTHENTICATED", "The setup token is invalid.");
+app.get("/v1/admin/licenses", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const result = await query(
+      `SELECT l.id, l.code_hint AS "codeHint", l.user_name AS "userName", l.user_number AS "userNumber",
+              l.plan, l.max_devices AS "maxDevices", l.expires_at AS "expiresAt", l.active,
+              l.created_at AS "createdAt", COUNT(d.id)::INTEGER AS "deviceCount",
+              COALESCE(json_agg(json_build_object('id', d.id, 'deviceId', d.device_id, 'deviceName', d.device_name, 'lastSeenAt', d.last_seen_at)
+                ORDER BY d.last_seen_at DESC) FILTER (WHERE d.id IS NOT NULL), '[]'::json) AS devices
+       FROM licenses l
+       LEFT JOIN workspaces w ON w.license_id = l.id
+       LEFT JOIN devices d ON d.workspace_id = w.id AND d.revoked_at IS NULL
+       GROUP BY l.id ORDER BY l.created_at DESC`,
+    );
+    return res.json({ ok: true, licenses: result.rows });
+  } catch (error) {
+    return jsonError(res, 500, "LICENSE_LIST_FAILED", error instanceof Error ? error.message : "License list failed");
   }
-  const code = normalizeText(req.body?.activationCode, 200);
+});
+
+app.post("/v1/admin/licenses", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const code = normalizeText(req.body?.activationCode, 200) || generateActivationCode();
   const plan = normalizeText(req.body?.plan, 40) || "monthly";
+  const userName = normalizeText(req.body?.userName, 160);
+  const userNumber = normalizeText(req.body?.userNumber, 80);
   const maxDevices = Number(req.body?.maxDevices);
   const expiresAt = req.body?.expiresAt ? new Date(req.body.expiresAt) : null;
-  if (!code || !Number.isInteger(maxDevices) || maxDevices < 1 || (expiresAt && Number.isNaN(expiresAt.getTime()))) {
-    return jsonError(res, 400, "INVALID_LICENSE", "activationCode, maxDevices and a valid optional expiresAt are required.");
+  if (!Number.isInteger(maxDevices) || maxDevices < 1 || (expiresAt && Number.isNaN(expiresAt.getTime()))) {
+    return jsonError(res, 400, "INVALID_LICENSE", "maxDevices and a valid optional expiresAt are required.");
   }
   try {
     const digest = sha256(code);
     const result = await query(
-      `INSERT INTO licenses (code_digest, plan, max_devices, expires_at)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (code_digest) DO UPDATE SET plan = EXCLUDED.plan, max_devices = EXCLUDED.max_devices, expires_at = EXCLUDED.expires_at, active = TRUE
+      `INSERT INTO licenses (code_digest, code_hint, user_name, user_number, plan, max_devices, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (code_digest) DO UPDATE SET code_hint = EXCLUDED.code_hint, user_name = EXCLUDED.user_name,
+         user_number = EXCLUDED.user_number, plan = EXCLUDED.plan, max_devices = EXCLUDED.max_devices,
+         expires_at = EXCLUDED.expires_at, active = TRUE
        RETURNING id, plan, max_devices AS "maxDevices", expires_at AS "expiresAt", active`,
-      [digest, plan, maxDevices, expiresAt],
+      [digest, code.slice(-6), userName, userNumber, plan, maxDevices, expiresAt],
     );
-    return res.status(201).json({ ok: true, license: result.rows[0] });
+    return res.status(201).json({ ok: true, activationCode: code, license: result.rows[0] });
   } catch (error) {
     return jsonError(res, 500, "LICENSE_CREATE_FAILED", error instanceof Error ? error.message : "License creation failed");
+  }
+});
+
+app.patch("/v1/admin/licenses/:id", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const id = normalizeText(req.params.id, 80);
+  const plan = normalizeText(req.body?.plan, 40) || "monthly";
+  const userName = normalizeText(req.body?.userName, 160);
+  const userNumber = normalizeText(req.body?.userNumber, 80);
+  const maxDevices = Number(req.body?.maxDevices);
+  const expiresAt = req.body?.expiresAt ? new Date(req.body.expiresAt) : null;
+  const active = req.body?.active !== false;
+  if (!Number.isInteger(maxDevices) || maxDevices < 1 || (expiresAt && Number.isNaN(expiresAt.getTime()))) {
+    return jsonError(res, 400, "INVALID_LICENSE", "maxDevices and a valid optional expiresAt are required.");
+  }
+  try {
+    const result = await query(
+      `UPDATE licenses SET plan = $1, user_name = $2, user_number = $3, max_devices = $4, expires_at = $5, active = $6
+       WHERE id = $7 RETURNING id, code_hint AS "codeHint", user_name AS "userName", user_number AS "userNumber",
+       plan, max_devices AS "maxDevices", expires_at AS "expiresAt", active`,
+      [plan, userName, userNumber, maxDevices, expiresAt, active, id],
+    );
+    if (!result.rowCount) return jsonError(res, 404, "LICENSE_NOT_FOUND", "License not found.");
+    return res.json({ ok: true, license: result.rows[0] });
+  } catch (error) {
+    return jsonError(res, 500, "LICENSE_UPDATE_FAILED", error instanceof Error ? error.message : "License update failed");
+  }
+});
+
+app.delete("/v1/admin/licenses/:id", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const id = normalizeText(req.params.id, 80);
+  try {
+    const result = await withTransaction(async (client) => {
+      await client.query(`DELETE FROM sync_operations WHERE workspace_id IN (SELECT id FROM workspaces WHERE license_id = $1)`, [id]);
+      await client.query(`DELETE FROM entities WHERE workspace_id IN (SELECT id FROM workspaces WHERE license_id = $1)`, [id]);
+      await client.query(`DELETE FROM devices WHERE workspace_id IN (SELECT id FROM workspaces WHERE license_id = $1)`, [id]);
+      await client.query(`DELETE FROM workspaces WHERE license_id = $1`, [id]);
+      return client.query(`DELETE FROM licenses WHERE id = $1 RETURNING id`, [id]);
+    });
+    if (!result.rowCount) return jsonError(res, 404, "LICENSE_NOT_FOUND", "License not found.");
+    return res.json({ ok: true, deleted: true });
+  } catch (error) {
+    return jsonError(res, 500, "LICENSE_DELETE_FAILED", error instanceof Error ? error.message : "License deletion failed");
+  }
+});
+
+app.delete("/v1/admin/devices/:id", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const result = await query(`UPDATE devices SET revoked_at = NOW() WHERE id = $1 RETURNING id`, [normalizeText(req.params.id, 80)]);
+    if (!result.rowCount) return jsonError(res, 404, "DEVICE_NOT_FOUND", "Device not found.");
+    return res.json({ ok: true, revoked: true });
+  } catch (error) {
+    return jsonError(res, 500, "DEVICE_REVOKE_FAILED", error instanceof Error ? error.message : "Device revoke failed");
   }
 });
 

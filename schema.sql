@@ -3,6 +3,9 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE IF NOT EXISTS licenses (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   code_digest TEXT NOT NULL UNIQUE,
+  code_hint TEXT NOT NULL DEFAULT '',
+  user_name TEXT NOT NULL DEFAULT '',
+  user_number TEXT NOT NULL DEFAULT '',
   plan TEXT NOT NULL DEFAULT 'monthly',
   max_devices INTEGER NOT NULL CHECK (max_devices > 0),
   expires_at TIMESTAMPTZ,
@@ -61,3 +64,7 @@ CREATE INDEX IF NOT EXISTS sync_operations_workspace_sequence_idx
 
 CREATE INDEX IF NOT EXISTS devices_workspace_active_idx
   ON devices (workspace_id) WHERE revoked_at IS NULL;
+
+ALTER TABLE licenses ADD COLUMN IF NOT EXISTS code_hint TEXT NOT NULL DEFAULT '';
+ALTER TABLE licenses ADD COLUMN IF NOT EXISTS user_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE licenses ADD COLUMN IF NOT EXISTS user_number TEXT NOT NULL DEFAULT '';

@@ -31,3 +31,21 @@ test("push is idempotent inside one workspace", () => {
   assert.match(server, /duplicate: true/);
   assert.match(server, /INSERT INTO sync_operations/);
 });
+
+test("admin panel supports license generation and lifecycle management", () => {
+  assert.match(server, /app\.get\("\/admin"/);
+  assert.match(server, /generateActivationCode/);
+  assert.match(server, /app\.get\("\/v1\/admin\/licenses"/);
+  assert.match(server, /app\.post\("\/v1\/admin\/licenses"/);
+  assert.match(server, /app\.patch\("\/v1\/admin\/licenses\/:id"/);
+  assert.match(server, /app\.delete\("\/v1\/admin\/licenses\/:id"/);
+  assert.match(server, /app\.delete\("\/v1\/admin\/devices\/:id"/);
+  assert.match(server, /SYNC_ADMIN_SETUP_TOKEN/);
+  assert.match(server, /توليد الكود وحفظ الترخيص/);
+});
+
+test("license schema stores operator-facing user identity fields", () => {
+  assert.match(schema, /user_name TEXT NOT NULL/);
+  assert.match(schema, /user_number TEXT NOT NULL/);
+  assert.match(schema, /code_hint TEXT NOT NULL/);
+});
