@@ -367,10 +367,19 @@ app.use((error, _req, res, _next) => {
   return jsonError(res, 500, "INTERNAL_ERROR", "Unexpected server error.");
 });
 
+function safeDatabaseError(error) {
+  const message = error instanceof Error ? error.message : "Unknown database error";
+  return databaseUrl ? message.replaceAll(databaseUrl, "[redacted]") : message;
+}
+
 async function start() {
   if (pool) {
-    await ensureSchema();
-    console.log("Sync schema is ready.");
+    try {
+      await ensureSchema();
+      console.log("Sync schema is ready.");
+    } catch (error) {
+      console.error("Failed to initialize sync schema", safeDatabaseError(error));
+    }
   }
   app.listen(port, "0.0.0.0", () => console.log(`Inventory sync server listening on ${port}`));
 }
