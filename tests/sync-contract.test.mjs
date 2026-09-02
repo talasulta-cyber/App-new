@@ -49,3 +49,18 @@ test("license schema stores operator-facing user identity fields", () => {
   assert.match(schema, /user_number TEXT NOT NULL/);
   assert.match(schema, /code_hint TEXT NOT NULL/);
 });
+
+test("cloud backup stores one latest snapshot per workspace", () => {
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS cloud_backups/);
+  assert.match(schema, /workspace_id UUID PRIMARY KEY REFERENCES workspaces\(id\) ON DELETE CASCADE/);
+  assert.match(server, /app\.post\("\/v1\/cloud-backup"/);
+  assert.match(server, /ON CONFLICT \(workspace_id\) DO UPDATE/);
+  assert.match(server, /app\.get\("\/v1\/cloud-backup"/);
+});
+
+test("account deletion removes cloud data and license state", () => {
+  assert.match(server, /app\.delete\("\/v1\/account"/);
+  assert.match(server, /DELETE FROM cloud_backups WHERE workspace_id/);
+  assert.match(server, /DELETE FROM devices WHERE workspace_id/);
+  assert.match(server, /DELETE FROM licenses WHERE id/);
+});

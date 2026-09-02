@@ -477,6 +477,51 @@ app.post("/v1/sync/heartbeat", authFromRequest, async (req, res) => {
   }
 });
 
+app.post("/v1/cloud-backup", authFromRequest, async (req, res) => {
+  const data = req.body?.data;
+  if (!data || typeof data !== "object" || Array.isArray(data)) return jsonError(res, 400, "INVALID_BACKUP", "A backup data object is required.");
+  try {
+    const payload = { format: "inventory-cloud-backup", version: 1, createdAt: req.body?.createdAt || new Date().toISOString(), data };
+    const result = await query(
+      `INSERT INTO cloud_backups (workspace_id, payload, created_at, updated_at)
+       VALUES ($1, $2::jsonb, NOW(), NOW())
+       ON CONFLICT (workspace_id) DO UPDATE SET payload = EXCLUDED.payload, created_at = NOW(), updated_at = NOW()
+       RETURNING created_at AS "createdAt"`,
+      [req.syncAuth.workspaceId, JSON.stringify(payload)],
+    );
+    return res.json({ ok: true, createdAt: result.rows[0]?.createdAt ?? new Date().toISOString(), size: JSON.stringify(payload).length });
+  } catch (error) {
+    return jsonError(res, 500, "CLOUD_BACKUP_FAILED", error instanceof Error ? error.message : "Cloud backup failed");
+  }
+});
+
+app.get("/v1/cloud-backup", authFromRequest, async (req, res) => {
+  try {
+    const result = await query(`SELECT payload, created_at AS "createdAt", updated_at AS "updatedAt" FROM cloud_backups WHERE workspace_id = $1`, [req.syncAuth.workspaceId]);
+    const row = result.rows[0];
+    if (!row) return jsonError(res, 404, "CLOUD_BACKUP_NOT_FOUND", "No cloud backup exists for this workspace.");
+    return res.json({ ok: true, createdAt: row.createdAt, updatedAt: row.updatedAt, size: JSON.stringify(row.payload).length, data: row.payload?.data ?? null });
+  } catch (error) {
+    return jsonError(res, 500, "CLOUD_BACKUP_FAILED", error instanceof Error ? error.message : "Cloud backup failed");
+  }
+});
+
+app.delete("/v1/account", authFromRequest, async (req, res) => {
+  try {
+    await withTransaction(async (client) => {
+      await client.query(`DELETE FROM sync_operations WHERE workspace_id = $1`, [req.syncAuth.workspaceId]);
+      await client.query(`DELETE FROM entities WHERE workspace_id = $1`, [req.syncAuth.workspaceId]);
+      await client.query(`DELETE FROM cloud_backups WHERE workspace_id = $1`, [req.syncAuth.workspaceId]);
+      await client.query(`DELETE FROM devices WHERE workspace_id = $1`, [req.syncAuth.workspaceId]);
+      const workspace = await client.query(`DELETE FROM workspaces WHERE id = $1 RETURNING license_id`, [req.syncAuth.workspaceId]);
+      if (workspace.rows[0]?.license_id) await client.query(`DELETE FROM licenses WHERE id = $1`, [workspace.rows[0].license_id]);
+    });
+    return res.json({ ok: true, deleted: true });
+  } catch (error) {
+    return jsonError(res, 500, "ACCOUNT_DELETE_FAILED", error instanceof Error ? error.message : "Account deletion failed");
+  }
+});
+
 app.use((error, _req, res, _next) => {
   if (error?.type === "entity.too.large") return jsonError(res, 413, "PAYLOAD_TOO_LARGE", "The request body is too large.");
   return jsonError(res, 500, "INTERNAL_ERROR", "Unexpected server error.");

@@ -56,6 +56,13 @@ CREATE TABLE IF NOT EXISTS sync_operations (
   UNIQUE (workspace_id, operation_id)
 );
 
+CREATE TABLE IF NOT EXISTS cloud_backups (
+  workspace_id UUID PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS entities_workspace_updated_idx
   ON entities (workspace_id, updated_at, entity_type, entity_id);
 
